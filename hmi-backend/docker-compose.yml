@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  hmi-go-app:
+    build: .
+    container_name: hmi-go-app
+    ports:
+      - "8080:8080"           # Seu backend acessível localmente
+    environment:
+      DB_USER: "ADMIN"        # Defina o usuário Oracle
+      DB_PASSWORD: "@@OracleDatabase9580!!"
+      DB_ALIAS: "hmidatabase_low"
+      TNS_ADMIN: /usr/oracle/wallet
+      LD_LIBRARY_PATH: /usr/lib/oracle/21/client64/lib
+    volumes:
+      - ./wallet:/usr/oracle/wallet
+    restart: unless-stopped
