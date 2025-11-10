@@ -1,5 +1,0 @@
-# Ignora o arquivo de variáveis de ambiente
-.env
-
-# Ignora a pasta do wallet
-/wallet/

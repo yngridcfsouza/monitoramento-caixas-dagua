@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import useWebSocket, { ReadyState } from 'react-use-websocket' // Removido SendJsonMessage não usado
+import { useState, useEffect, useRef } from 'react'
+import { io, Socket } from 'socket.io-client'
 import './App.css'
 import Tank from './components/Tank'
 import Pump from './components/Pump'
@@ -34,21 +34,15 @@ interface WsMessage {
 // --- Fim dos Tipos ---
 
 
-// --- 2. Constantes da API (sem mudanças) ---
-const API_URL = 'http://localhost:8080/api/v1/status'
-const WS_URL = 'ws://localhost:8080/ws'
+// --- 2. Constantes da API (via Vite ENV) ---
+const API_URL = import.meta.env.VITE_API_URL as string
+const WS_BASE = import.meta.env.VITE_WS_BASE as string
 
 
 function App() {
   // --- 3. Gerenciamento de Estado (REFATORADO) ---
   const [state, setState] = useState<HMIState | null>(null)
-  
-  // --- MUDANÇA: 'sendJsonMessage' é pego aqui ---
-  const { lastMessage, readyState, sendJsonMessage } = useWebSocket(WS_URL, {
-    onOpen: () => console.log('Conexão WebSocket estabelecida.'),
-    onClose: () => console.log('Conexão WebSocket perdida.'),
-    shouldReconnect: () => true,
-  })
+  const socketRef = useRef<Socket | null>(null)
 
   // --- 4. Lógica de Carregamento (sem mudanças) ---
   useEffect(() => {
@@ -69,28 +63,38 @@ function App() {
     fetchInitialState()
   }, [])
 
+  // --- 4. Socket.io: conexão e assinatura de updates ---
   useEffect(() => {
-    if (lastMessage !== null) {
-      const newState: HMIState = JSON.parse(lastMessage.data)
+    console.log('Conectando ao Socket.io em', WS_BASE)
+    const socket = io(WS_BASE, { transports: ['websocket'] })
+    socketRef.current = socket
+
+    socket.on('connect', () => {
+      console.log('Conectado ao Socket.io')
+    })
+    socket.on('disconnect', () => {
+      console.log('Desconectado do Socket.io')
+    })
+    socket.on('hmi_update', (newState: HMIState) => {
       setState(newState)
+    })
+
+    return () => {
+      socket.disconnect()
+      socketRef.current = null
     }
-  }, [lastMessage])
+  }, [])
 
   // --- 5. Renderização (REFATORADO) ---
-  const connectionStatus = {
-    [ReadyState.CONNECTING]: 'Conectando...',
-    [ReadyState.OPEN]: 'Conectado (Tempo Real)',
-    [ReadyState.CLOSING]: 'Fechando...',
-    [ReadyState.CLOSED]: 'Desconectado',
-    [ReadyState.UNINSTANTIATED]: 'Não instanciado',
-  }[readyState]
+  const connectionStatus = socketRef.current?.connected ? 'Conectado (Tempo Real)' : 'Desconectado'
 
   const handleCommand = (command: WsMessage) => {
-    if (readyState === ReadyState.OPEN) {
-      sendJsonMessage(command); // <-- Usa a função do hook
-      console.log('Comando enviado:', command);
+    const socket = socketRef.current
+    if (socket && socket.connected) {
+      socket.emit(command.type, command.payload)
+      console.log('Comando enviado:', command)
     } else {
-      console.warn('Não foi possível enviar comando: WebSocket não está conectado.');
+      console.warn('Não foi possível enviar comando: Socket.io não está conectado.')
     }
   }
 

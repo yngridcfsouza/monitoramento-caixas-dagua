@@ -67,7 +67,7 @@ const Tank: React.FC<TankProps> = ({ id, level }) => {
 
       {/* O Texto do Nível (ex: 41.5%) */}
       <div style={levelPercentStyle}>
-        {level.toFixed(1)}% {/* Formata para 1 casa decimal */}
+        {level !== undefined ? level.toFixed(1) : 'N/A'} 
       </div>
     </div>
   );
