@@ -64,7 +64,7 @@ function runStateLogic() {
   const now = new Date().toISOString();
 
   if (tank1) {
-    if (tank1.level <= 10.0) {
+    if (tank1.level <= 40.0) {
       newAlerts.push({
         id: "T-100-LOW", message: "Nível CRÍTICO Baixo - Cisterna T-100", level: "Critical", activeAt: now,
       });

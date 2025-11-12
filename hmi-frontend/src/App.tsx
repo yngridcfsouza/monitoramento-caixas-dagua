@@ -101,7 +101,7 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>Dashboard HMI (React + Go)</h1>
+        <h1>Dashboard HMI</h1>
         <p>Status do WebSocket: <strong>{connectionStatus}</strong></p>
       </header>
       
