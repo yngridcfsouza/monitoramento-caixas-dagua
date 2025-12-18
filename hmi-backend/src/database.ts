@@ -1,27 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-
-// --- 1. Modelos de Dados 
-export interface PumpStatus {
-  id: string;
-  on: boolean;
-  pumpMode: string;
-}
-export interface TankStatus {
-  id: string;
-  level: number;
-}
-export interface Alert {
-  id: string;
-  message: string;
-  level: string;
-  activeAt: string;
-}
-export interface HMIState {
-  tanks: TankStatus[];
-  pumps: PumpStatus[];
-  activeAlerts: Alert[];
-}
+import type { PumpStatus, TankStatus, HMIState } from './types.js';
 
 // --- 2. Conexão com o Banco de Dados ---
 
@@ -39,39 +18,89 @@ export function initDB() {
   
   // Usamos 'transaction' para garantir que tudo execute de uma vez
   const createSchema = db.transaction(() => {
-    // Tabela de Tanques
+    // Tabela de Tanques (com campos opcionais bloco, categoria, local)
     db.prepare(`
       CREATE TABLE IF NOT EXISTS hmi_tanks (
-        id TEXT PRIMARY KEY,
-        level_percent REAL NOT NULL
+        id TEXT PRIMARY KEY,2
+        level_percent REAL NOT NULL,
+        bloco TEXT,
+        categoria TEXT CHECK(categoria IN ('inferior', 'superior')),
+        local TEXT
       )
     `).run();
 
-    // Tabela de Bombas
+    // Tabela de Bombas (sem pump_mode)
     db.prepare(`
       CREATE TABLE IF NOT EXISTS hmi_pumps (
         id TEXT PRIMARY KEY,
         is_on INTEGER NOT NULL,
-        pump_mode TEXT NOT NULL
+        flow REAL DEFAULT 0
       )
     `).run();
     
-    // Tabela de Histórico (como você sugeriu)
+    // Tabela de Histórico (todos NOT NULL)
     db.prepare(`
       CREATE TABLE IF NOT EXISTS readings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tank_id TEXT,
-        level REAL,
+        tank_id TEXT NOT NULL,
+        level REAL NOT NULL,
+        flow REAL NOT NULL,
         timestamp DATETIME DEFAULT (datetime('now'))
       )
     `).run();
 
-    // --- Dados Padrão (Idempotente) ---
-    // (INSERT OR IGNORE é a sintaxe do SQLite para "só insira se não existir")
+    // Migração: remover pump_mode se existir em hmi_pumps
+    try {
+      const cols = db.prepare("PRAGMA table_info(hmi_pumps)").all() as any[];
+      const hasPumpMode = cols.some((c: any) => c.name === 'pump_mode');
+      if (hasPumpMode) {
+        db.prepare(`CREATE TABLE IF NOT EXISTS hmi_pumps_new (
+          id TEXT PRIMARY KEY,
+          is_on INTEGER NOT NULL,
+          flow REAL DEFAULT 0
+        )`).run();
+        db.prepare(`INSERT INTO hmi_pumps_new (id, is_on, flow)
+          SELECT id, is_on, COALESCE(flow, 0) FROM hmi_pumps`).run();
+        db.prepare(`DROP TABLE hmi_pumps`).run();
+        db.prepare(`ALTER TABLE hmi_pumps_new RENAME TO hmi_pumps`).run();
+      }
+    } catch {}
+
+    // Migração: garantir colunas opcionais em hmi_tanks
+    try {
+      const tcols = db.prepare("PRAGMA table_info(hmi_tanks)").all() as any[];
+      const hasBloco = tcols.some((c: any) => c.name === 'bloco');
+      const hasCategoria = tcols.some((c: any) => c.name === 'categoria');
+      const hasLocal = tcols.some((c: any) => c.name === 'local');
+      if (!hasBloco) db.prepare("ALTER TABLE hmi_tanks ADD COLUMN bloco TEXT").run();
+      if (!hasCategoria) db.prepare("ALTER TABLE hmi_tanks ADD COLUMN categoria TEXT CHECK(categoria IN ('inferior','superior'))").run();
+      if (!hasLocal) db.prepare("ALTER TABLE hmi_tanks ADD COLUMN local TEXT").run();
+    } catch {}
+
+    // Migração: reforçar NOT NULL em readings (recriar se necessário)
+    try {
+      const rcols = db.prepare("PRAGMA table_info(readings)").all() as any[];
+      const okTankId = rcols.some((c: any) => c.name === 'tank_id' && c.notnull === 1);
+      const okLevel = rcols.some((c: any) => c.name === 'level' && c.notnull === 1);
+      const okFlow = rcols.some((c: any) => c.name === 'flow' && c.notnull === 1);
+      if (!(okTankId && okLevel && okFlow)) {
+        db.prepare(`CREATE TABLE IF NOT EXISTS readings_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tank_id TEXT NOT NULL,
+          level REAL NOT NULL,
+          flow REAL NOT NULL,
+          timestamp DATETIME DEFAULT (datetime('now'))
+        )`).run();
+        db.prepare(`INSERT INTO readings_new (tank_id, level, flow, timestamp)
+          SELECT tank_id, level, COALESCE(flow, 0), COALESCE(timestamp, datetime('now')) FROM readings`).run();
+        db.prepare(`DROP TABLE readings`).run();
+        db.prepare(`ALTER TABLE readings_new RENAME TO readings`).run();
+      }
+    } catch {}
+
+    // Dados iniciais idempotentes
     db.prepare("INSERT OR IGNORE INTO hmi_tanks (id, level_percent) VALUES (?, ?)").run('T-100', 50.0);
     db.prepare("INSERT OR IGNORE INTO hmi_tanks (id, level_percent) VALUES (?, ?)").run('T-200', 60.0);
-    db.prepare("INSERT OR IGNORE INTO hmi_pumps (id, is_on, pump_mode) VALUES (?, ?, ?)").run('P-100', 0, 'AUTO');
-    db.prepare("INSERT OR IGNORE INTO hmi_pumps (id, is_on, pump_mode) VALUES (?, ?, ?)").run('P-200', 0, 'AUTO');
   });
 
   createSchema();
@@ -90,7 +119,7 @@ export function loadStateFromDB(): HMIState {
   const pumps: PumpStatus[] = pumpsRaw.map(p => ({
     id: p.id,
     on: p.is_on === 1, // Converte 0/1 para false/true
-    pumpMode: p.pump_mode,
+    flow: typeof p.flow === 'number' ? p.flow : undefined,
   }));
 
   console.log(`Carregados ${tanks.length} tanques e ${pumps.length} bombas do DB.`);
@@ -105,29 +134,25 @@ export function loadStateFromDB(): HMIState {
 // --- Funções de Escrita no DB (assíncronas) ---
 // (Não precisamos esperar elas terminarem)
 
-export async function DBUpdatePumpMode(id: string, mode: string) {
+export async function DBUpdatePumpState(id: string, on: boolean, flow?: number) {
   try {
-    db.prepare("UPDATE hmi_pumps SET pump_mode = ? WHERE id = ?").run(mode, id);
-  } catch (err) {
-    console.error(`ERRO AO SALVAR MODO NO DB: ${(err as Error).message}`);
-  }
-}
-
-export async function DBUpdatePumpState(id: string, on: boolean) {
-  try {
-    const isOnInt = on ? 1 : 0; // Converte true/false para 1/0
-    db.prepare("UPDATE hmi_pumps SET is_on = ? WHERE id = ?").run(isOnInt, id);
+    const isOnInt = on ? 1 : 0;
+    if (typeof flow === 'number') {
+      db.prepare("UPDATE hmi_pumps SET is_on = ?, flow = ? WHERE id = ?").run(isOnInt, flow, id);
+    } else {
+      db.prepare("UPDATE hmi_pumps SET is_on = ? WHERE id = ?").run(isOnInt, id);
+    }
   } catch (err) {
     console.error(`ERRO AO SALVAR ESTADO NO DB: ${(err as Error).message}`);
   }
 }
 
-export async function DBUpdateTankLevel(id: string, level: number) {
+export async function DBUpdateTankLevel(id: string, level: number, flow: number) {
   try {
     // Atualiza o estado principal
     db.prepare("UPDATE hmi_tanks SET level_percent = ? WHERE id = ?").run(level, id);
     // Insere no histórico
-    db.prepare("INSERT INTO readings (tank_id, level) VALUES (?, ?)").run(id, level);
+    db.prepare("INSERT INTO readings (tank_id, level, flow) VALUES (?, ?, ?)").run(id, level, flow);
   } catch (err) {
     console.error(`ERRO AO SALVAR NÍVEL NO DB: ${(err as Error).message}`);
   }

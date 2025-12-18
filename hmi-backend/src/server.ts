@@ -2,22 +2,19 @@ import Fastify from 'fastify';
 import { Server } from 'socket.io';
 import cors from '@fastify/cors'; // Plugin de CORS para Fastify
 
-import type {
-  HMIState,
-} from './database.js';
+import type { HMIState, SensorPayload } from './types.js';
 
 import {
   initDB,
   loadStateFromDB,
-  DBUpdatePumpMode,
   DBUpdatePumpState,
   DBUpdateTankLevel,
 } from './database.js';
+import { runAlertLogic } from './logic.js';
 
 // Tipos de payload utilizados pelos endpoints e eventos de socket
-type SensorPayload = { id: string; level: number };
-type PumpModePayload = { id: string; pumpMode: 'AUTO' | 'MANUAL' };
-type PumpStatePayload = { id: string; on: boolean };
+// tipos em types.ts
+// Removidos: PumpModePayload e PumpStatePayload (decisão de bomba vem do sensor)
 
 // --- 1. Armazenamento de Estado (na Memória) ---
 // (Assim como no Go, carregamos o DB para a memória para acesso rápido)
@@ -50,16 +47,8 @@ const io = new Server(fastify.server, {
  * Ela deve ser chamada *depois* que o 'store' já foi travado.
  */
 function runStateLogic() {
-  // 1. Lógica de Bombas (AUTO)
-  const pump1 = store.pumps.find((p: any) => p.id === 'P-100');
+  // Lógica de Alertas apenas (decisão de bomba já vem do sensor)
   const tank1 = store.tanks.find((t: any) => t.id === 'T-100');
-
-  if (pump1 && tank1 && pump1.pumpMode === 'AUTO') {
-    pump1.on = tank1.level > 90;
-  }
-  // (Adicionar lógica para P-200 aqui...)
-
-  // 2. Lógica de Alertas
   const newAlerts = [];
   const now = new Date().toISOString();
 
@@ -108,16 +97,31 @@ fastify.post('/api/v1/sensor/update', (request, reply) => {
     }
     
     tank.level = payload.level;
+    tank.flowRate = payload.flow;
+    tank.pumpStatus = payload.pumpStatus;
     fastify.log.info(`Recebido dado do sensor: ID ${payload.id}, Nível ${payload.level}`);
 
-    // Roda a lógica (bombas, alertas)
-    runStateLogic();
+    const tankToPump: Record<string, string> = { 'T-100': 'P-100', 'T-200': 'P-200' };
+    const pumpId = tankToPump[payload.id];
+    if (pumpId) {
+      const pump = store.pumps.find((p: any) => p.id === pumpId);
+      if (pump) {
+        const flowVal = payload.flow;
+        (pump as any).flow = flowVal;
+        const nextOn = payload.pumpStatus === 'Ligada';
+        pump.on = nextOn;
+        DBUpdatePumpState(pumpId, nextOn, flowVal);
+      }
+    }
+  
+    runAlertLogic(store);
 
     // Transmite o novo estado para TODOS os clientes React
     broadcastStateChange();
 
     // Salva no DB (em background, sem esperar)
-    DBUpdateTankLevel(payload.id, payload.level);
+    const flowVal = payload.flow;
+    DBUpdateTankLevel(payload.id, payload.level, flowVal);
     
     // Responde ao ESP32
     reply.status(200).send({ message: "Dados recebidos com sucesso" });
@@ -128,6 +132,8 @@ fastify.post('/api/v1/sensor/update', (request, reply) => {
   }
 });
 
+// Removido endpoint separado de bomba: dados vêm apenas do sensor
+
 
 // ======================================================
 // --- 6. Lógica do WebSocket (Comandos do React) ---
@@ -136,33 +142,7 @@ fastify.post('/api/v1/sensor/update', (request, reply) => {
 io.on('connection', (socket) => {
   console.log(`Novo cliente conectado: ${socket.id}`);
   
-  // Escuta pelo comando 'SET_PUMP_MODE'
-  socket.on('SET_PUMP_MODE', (payload: PumpModePayload) => {
-    fastify.log.info(`Comando recebido: SET_PUMP_MODE para ${payload.id}`);
-
-    const pump = store.pumps.find((p: any) => p.id === payload.id);
-    if (pump) {
-      pump.pumpMode = payload.pumpMode;
-      runStateLogic(); // Roda a lógica
-      broadcastStateChange(); // Transmite
-      DBUpdatePumpMode(payload.id, payload.pumpMode); // Salva no DB
-    }
-  });
-
-  // Escuta pelo comando 'SET_PUMP_STATE'
-  socket.on('SET_PUMP_STATE', (payload: PumpStatePayload) => {
-    fastify.log.info(`Comando recebido: SET_PUMP_STATE para ${payload.id}`);
-
-    const pump = store.pumps.find((p: any) => p.id === payload.id);
-    if (pump && pump.pumpMode === 'MANUAL') {
-      pump.on = payload.on;
-      runStateLogic(); // Roda a lógica
-      broadcastStateChange(); // Transmite
-      DBUpdatePumpState(payload.id, payload.on); // Salva no DB
-    } else {
-      fastify.log.warn(`Comando SET_PUMP_STATE ignorado: Bomba ${payload.id} está em MODO AUTO`);
-    }
-  });
+  // Removidos handlers de controle de bomba via WebSocket
 
   socket.on('disconnect', () => {
     console.log(`Cliente desconectado: ${socket.id}`);

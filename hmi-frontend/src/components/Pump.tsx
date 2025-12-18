@@ -9,7 +9,9 @@ interface WsMessage {
 interface PumpProps {
   id: string;
   on: boolean;
-  pumpMode: string; // <-- Renomeado
+  pumpMode: string;
+  flow?: number;
+  updateSeq: number;
   onCommand: (command: WsMessage) => void;
 }
 // --- FIM DA MUDANÇA ---
@@ -57,81 +59,41 @@ const infoStyle: React.CSSProperties = {
   fontSize: '12px',
   color: '#aaa',
 };
-const buttonStyle: React.CSSProperties = {
-  marginTop: '10px',
-  padding: '6px 10px',
-  fontSize: '12px',
-  fontWeight: 'bold',
-  cursor: 'pointer',
-  border: 'none',
-  borderRadius: '4px',
-  width: '100%',
-};
 // --- Fim Estilos ---
 
 
 // Componente da Bomba
 // --- MUDANÇA: 'mode' -> 'pumpMode' ---
-const Pump: React.FC<PumpProps> = ({ id, on, pumpMode, onCommand }) => {
+const Pump: React.FC<PumpProps> = (props) => {
+  const { id, flow, updateSeq } = props
+  const [systemOn, setSystemOn] = React.useState(((flow ?? 0) * 1000000) > 0)
+  const onStreakRef = React.useRef(0)
+  const offStreakRef = React.useRef(0)
+  React.useEffect(() => {
+    const cmFlow = (flow ?? 0) * 1000000
+    if (cmFlow > 0) {
+      onStreakRef.current += 1
+      offStreakRef.current = 0
+      if (onStreakRef.current >= 3) setSystemOn(true)
+    } else {
+      offStreakRef.current += 1
+      onStreakRef.current = 0
+      if (offStreakRef.current >= 3) setSystemOn(false)
+    }
+  }, [updateSeq])
   
   // (Estilos dinâmicos de símbolo/rotor sem mudanças)
   const dynamicSymbolStyle: React.CSSProperties = {
     ...symbolStyle,
-    backgroundColor: on ? '#2ecc71' : '#e74c3c',
-    boxShadow: on ? '0 0 15px 3px rgba(46, 204, 113, 0.5)' : 'none',
+    backgroundColor: systemOn ? '#2ecc71' : '#e74c3c',
+    boxShadow: systemOn ? '0 0 15px 3px rgba(46, 204, 113, 0.5)' : 'none',
   };
   const dynamicImpellerStyle: React.CSSProperties = {
     ...impellerStyle,
-    animation: on ? 'spin 1.5s linear infinite' : 'none',
+    animation: systemOn ? 'spin 1.5s linear infinite' : 'none',
   };
 
 
-  // --- MUDANÇA: Lógica usa 'pumpMode' ---
-  const handleModeToggle = () => {
-    const newMode = (pumpMode === 'AUTO') ? 'MANUAL' : 'AUTO';
-    
-    const command: WsMessage = {
-      type: "SET_PUMP_MODE",
-      payload: {
-        id: id,
-        pumpMode: newMode // <-- Envia 'pumpMode'
-      }
-    };
-    onCommand(command);
-  };
-  
-  const handleStateToggle = () => {
-    if (pumpMode === 'MANUAL') { // <-- Checa 'pumpMode'
-      const newState = !on; 
-      const command: WsMessage = {
-        type: "SET_PUMP_STATE",
-        payload: {
-          id: id,
-          on: newState
-        }
-      };
-      onCommand(command);
-    }
-  };
-  
-  const dynamicModeButtonStyle: React.CSSProperties = {
-    ...buttonStyle,
-    backgroundColor: pumpMode === 'AUTO' ? '#007bff' : '#6c757d', // <-- Checa 'pumpMode'
-    color: 'white',
-  };
-  
-  const dynamicStateButtonStyle: React.CSSProperties = {
-    ...buttonStyle,
-    marginTop: '4px',
-    backgroundColor: on ? '#dc3545' : '#28a745',
-    color: 'white',
-  };
-
-  if (pumpMode !== 'MANUAL') { // <-- Checa 'pumpMode'
-    dynamicStateButtonStyle.backgroundColor = '#6c757d';
-    dynamicStateButtonStyle.opacity = 0.5;
-    dynamicStateButtonStyle.cursor = 'not-allowed';
-  }
   // --- FIM DA MUDANÇA ---
 
 
@@ -142,21 +104,9 @@ const Pump: React.FC<PumpProps> = ({ id, on, pumpMode, onCommand }) => {
         <div style={dynamicImpellerStyle}></div>
       </div>
       <div style={infoStyle}>
-        Status: <strong>{on ? 'LIGADA' : 'DESLIGADA'}</strong>
+        Vazão: <strong>{(((flow ?? 0) * 1000000)).toFixed(2)} cm³/s</strong><br/>
+        Sistema: <strong>{systemOn ? 'LIGADO' : 'DESLIGADO'}</strong>
       </div>
-      
-      {/* --- MUDANÇA: 'mode' -> 'pumpMode' --- */}
-      <button style={dynamicModeButtonStyle} onClick={handleModeToggle}>
-        Modo: {pumpMode} 
-      </button>
-
-      <button 
-        style={dynamicStateButtonStyle} 
-        onClick={handleStateToggle}
-        disabled={pumpMode !== 'MANUAL'} // <-- Checa 'pumpMode'
-      >
-        {on ? 'Desligar Manual' : 'Ligar Manual'}
-      </button>
     </div>
   );
 };

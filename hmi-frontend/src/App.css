@@ -1,8 +1,26 @@
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: initial;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100vh;
+}
+
+.sidebar {
+  background-color: #1f232b;
+  border-right: 1px solid #3a3f47;
+  padding: 16px 12px;
+}
+
+.content {
+  overflow: auto;
+  padding: 16px;
 }
 
 .logo {
