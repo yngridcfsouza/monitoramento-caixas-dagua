@@ -23,6 +23,14 @@ export interface Alert {
   activeAt: string
 }
 
+export interface User {
+  id: number
+  username: string
+  password?: string // Opcional pois não enviamos para o front
+  role: 'admin' | 'operator' | 'viewer'
+  created_at: string
+}
+
 export interface HMIState {
   tanks: TankStatus[]
   pumps: PumpStatus[]

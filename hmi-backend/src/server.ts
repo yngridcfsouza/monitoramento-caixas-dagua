@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import { Server } from 'socket.io';
 import cors from '@fastify/cors'; // Plugin de CORS para Fastify
+import jwt from '@fastify/jwt';
+import bcrypt from 'bcryptjs';
 
 import type { HMIState, SensorPayload } from './types.js';
 
@@ -9,6 +11,7 @@ import {
   loadStateFromDB,
   DBUpdatePumpState,
   DBUpdateTankLevel,
+  DBGetUserByUsername
 } from './database.js';
 import { runAlertLogic } from './logic.js';
 
@@ -26,6 +29,11 @@ const fastify = Fastify({ logger: true });
 // Registra o CORS para permitir que o React (ex: localhost:5173) se conecte
 fastify.register(cors, {
   origin: "*", // Em produção, mude para o seu domínio
+});
+
+// Registra JWT
+fastify.register(jwt, {
+  secret: process.env.JWT_SECRET || 'supersecret'
 });
 
 // --- 3. O Servidor WebSocket (Socket.io) ---
@@ -82,6 +90,45 @@ function broadcastStateChange() {
 // GET /api/v1/status (Para o React carregar o estado inicial)
 fastify.get('/api/v1/status', (request, reply) => {
   reply.send(store);
+});
+
+// POST /api/login
+fastify.post('/api/login', async (request, reply) => {
+  const { username, password } = request.body as any;
+
+  if (!username || !password) {
+    return reply.status(400).send({ error: 'Username and password required' });
+  }
+
+  const user = DBGetUserByUsername(username);
+
+  if (!user) {
+    return reply.status(401).send({ error: 'Invalid credentials' });
+  }
+
+  // Verifica senha
+  // IMPORTANTE: Por enquanto, a senha 'admin' está salva como texto plano.
+  // Futuramente, usar bcrypt.compareSync(password, user.password)
+  let isValid = false;
+  if (user.password === password) {
+    isValid = true;
+  } else {
+    // Tenta bcrypt caso tenhamos migrado
+    // isValid = bcrypt.compareSync(password, user.password);
+  }
+
+  if (!isValid) {
+    return reply.status(401).send({ error: 'Invalid credentials' });
+  }
+
+  // Gera Token
+  const token = fastify.jwt.sign({ 
+    id: user.id, 
+    username: user.username, 
+    role: user.role 
+  });
+
+  return { token };
 });
 
 // POST /api/v1/sensor/update (Para o ESP32 enviar dados)

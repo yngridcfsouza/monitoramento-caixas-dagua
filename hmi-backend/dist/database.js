@@ -16,7 +16,7 @@ export function initDB() {
         // Tabela de Tanques (com campos opcionais bloco, categoria, local)
         db.prepare(`
       CREATE TABLE IF NOT EXISTS hmi_tanks (
-        id TEXT PRIMARY KEY,
+        id TEXT PRIMARY KEY,2
         level_percent REAL NOT NULL,
         bloco TEXT,
         categoria TEXT CHECK(categoria IN ('inferior', 'superior')),
@@ -39,6 +39,16 @@ export function initDB() {
         level REAL NOT NULL,
         flow REAL NOT NULL,
         timestamp DATETIME DEFAULT (datetime('now'))
+      )
+    `).run();
+        // Tabela de Usuários
+        db.prepare(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT CHECK(role IN ('admin', 'operator', 'viewer')) DEFAULT 'viewer',
+        created_at DATETIME DEFAULT (datetime('now'))
       )
     `).run();
         // Migração: remover pump_mode se existir em hmi_pumps
@@ -96,6 +106,8 @@ export function initDB() {
         // Dados iniciais idempotentes
         db.prepare("INSERT OR IGNORE INTO hmi_tanks (id, level_percent) VALUES (?, ?)").run('T-100', 50.0);
         db.prepare("INSERT OR IGNORE INTO hmi_tanks (id, level_percent) VALUES (?, ?)").run('T-200', 60.0);
+        // Usuário admin padrão (senha 'admin' em texto plano por enquanto - EM PRODUÇÃO USAR HASH/BCRYPT)
+        db.prepare("INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)").run('admin', 'admin', 'admin');
     });
     createSchema();
     console.log('Schema do banco de dados pronto.');
@@ -145,5 +157,11 @@ export async function DBUpdateTankLevel(id, level, flow) {
     catch (err) {
         console.error(`ERRO AO SALVAR NÍVEL NO DB: ${err.message}`);
     }
+}
+/**
+ * Busca usuário pelo nome de usuário
+ */
+export function DBGetUserByUsername(username) {
+    return db.prepare("SELECT * FROM users WHERE username = ?").get(username);
 }
 //# sourceMappingURL=database.js.map

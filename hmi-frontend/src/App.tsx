@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { io, Socket } from 'socket.io-client'
 import './App.css'
 import Tank from './components/Tank'
 import AlertPanel from './components/AlertPanel'
 import Sidebar from './components/Sidebar'
 import FixedAlertStatus from './components/FixedAlertStatus'
+import Login from './components/Login'
 
 // --- Tipos ---
 interface PumpStatus {
@@ -295,19 +296,41 @@ function App() {
     </div>
   )
 
-  return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <Sidebar />
-      </aside>
-      <div className="content">
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/alertas" element={<AlertasAvisos />} />
-        </Routes>
+  const RequireAuth = ({ children }: { children: React.ReactNode }) => {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      return <Navigate to="/login" replace />
+    }
+    return children
+  }
+
+  const Layout = () => {
+    return (
+      <div className="app-shell">
+        <aside className="sidebar">
+          <Sidebar />
+        </aside>
+        <div className="content">
+          <Outlet />
+        </div>
       </div>
-    </div>
+    )
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      
+      <Route element={
+        <RequireAuth>
+          <Layout />
+        </RequireAuth>
+      }>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/alertas" element={<AlertasAvisos />} />
+      </Route>
+    </Routes>
   )
 }
 

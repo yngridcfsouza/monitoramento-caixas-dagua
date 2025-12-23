@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import type { PumpStatus, TankStatus, HMIState } from './types.js';
+import type { PumpStatus, TankStatus, HMIState, User } from './types.js';
 
 // --- 2. Conexão com o Banco de Dados ---
 
@@ -46,6 +46,17 @@ export function initDB() {
         level REAL NOT NULL,
         flow REAL NOT NULL,
         timestamp DATETIME DEFAULT (datetime('now'))
+      )
+    `).run();
+
+    // Tabela de Usuários
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT CHECK(role IN ('admin', 'operator', 'viewer')) DEFAULT 'viewer',
+        created_at DATETIME DEFAULT (datetime('now'))
       )
     `).run();
 
@@ -101,6 +112,9 @@ export function initDB() {
     // Dados iniciais idempotentes
     db.prepare("INSERT OR IGNORE INTO hmi_tanks (id, level_percent) VALUES (?, ?)").run('T-100', 50.0);
     db.prepare("INSERT OR IGNORE INTO hmi_tanks (id, level_percent) VALUES (?, ?)").run('T-200', 60.0);
+
+    // Usuário admin padrão (senha 'admin' em texto plano por enquanto - EM PRODUÇÃO USAR HASH/BCRYPT)
+    db.prepare("INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)").run('admin', 'admin', 'admin');
   });
 
   createSchema();
@@ -156,4 +170,11 @@ export async function DBUpdateTankLevel(id: string, level: number, flow: number)
   } catch (err) {
     console.error(`ERRO AO SALVAR NÍVEL NO DB: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Busca usuário pelo nome de usuário
+ */
+export function DBGetUserByUsername(username: string): User | undefined {
+  return db.prepare("SELECT * FROM users WHERE username = ?").get(username) as User | undefined;
 }
