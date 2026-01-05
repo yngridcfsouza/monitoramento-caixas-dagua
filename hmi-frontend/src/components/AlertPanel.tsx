@@ -1,17 +1,10 @@
 import React from 'react';
-
-interface Alert {
-  id: string;
-  message: string;
-  level: "Warning" | "Critical";
-  activeAt: string;
-  tankId?: string;
-}
+import type { Alert, TankStatus } from '../types';
 
 interface AlertPanelProps {
   alerts: Alert[];
   history: Alert[];
-  tanks: { id: string; level: number }[];
+  tanks: TankStatus[];
 }
 
 const panelStyle: React.CSSProperties = {
